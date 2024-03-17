@@ -1,4 +1,3 @@
-import asyncio
 import re
 import sys
 import asyncio
@@ -7,6 +6,7 @@ import os
 from typing import Any
 from pathlib import Path
 import time
+import argparse
 
 from bleak import BleakScanner, BleakClient, AdvertisementData
 from bleak.backends.device import BLEDevice as BleakDevice
@@ -14,14 +14,24 @@ import requests.exceptions
 
 from open_gopro import WirelessGoPro, WiredGoPro, Params
 
+from media_downloader import MediaDownloader
+
 # File deletion is possible but not currently part of the SDK: https://github.com/gopro/OpenGoPro/issues/74
 #   Will take a little extending to get it working, but seems doable.
 async def main() -> None:
-    await test_wired()
+    args = parse_args()
+    print(args)
+    await test_wired(args.dest_dir)
     # await test_wireless()
 
 
-async def test_wired() -> None:
+def parse_args():
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('dest_dir', nargs='?', default='.download')
+
+    return argparser.parse_args()
+
+async def test_wired(dest_dir: str) -> None:
     """
     Xfer rate is all over the place.  12-41 MiB/s in one case!
     Actually, it really seems to stay fast after the first few files.
@@ -29,50 +39,13 @@ async def test_wired() -> None:
     """
     files_to_download = set((f"100GOPRO/GX0{index}.MP4" for index in range (12481, 12508)))
 
-    download_dest = Path(".download")
-    last_downloaded_file = download_dest / '.last-downloaded.txt'
-    last_downloaded = last_downloaded_file.read_text() if last_downloaded_file.exists() else ''
-
     async with WiredGoPro() as gopro:
         cam_info = await gopro.http_command.get_camera_info()
         print(cam_info)
-        media_list = await gopro.http_command.get_media_list()
-        all_files = media_list.data.files
-        all_files.sort(key = lambda media_item: media_item.filename)
-        file_list = [file for file in all_files if file.filename > last_downloaded]
 
-        print(f"Downloading latest {len(file_list)} of {len(all_files)} on camera.")
-        await gopro.http_command.set_turbo_mode(mode=Params.Toggle.ENABLE)
+        downloader = MediaDownloader(gopro, Path(dest_dir))
+        await downloader.download_all_new()
 
-        for media_item in file_list:
-            local_file = download_dest / Path(media_item.filename).name
-            if local_file.exists():
-                continue
-            print(media_item.filename)
-            # if media_item.filename not in files_to_download:
-            #     continue
-            file_meta = (await gopro.http_command.get_media_metadata(path=media_item.filename)).data
-            print(file_meta)
-            file_timestamp = int(file_meta.creation_timestamp)
-            file_size = int(file_meta.file_size)
-            print(f"Downloading {media_item.filename} ({file_size} bytes)")
-
-            for tries in range(10):
-                try:
-                    start_time = time.time()
-                    await gopro.http_command.download_file(camera_file=media_item.filename, local_file=local_file)
-                    elapsed = time.time() - start_time
-                    throughput = file_size / 1048576 / elapsed
-                    print(f'Download complete in {elapsed}s {throughput} MiB/s')
-                    os.utime(local_file, (file_timestamp, file_timestamp))
-                    last_downloaded_file.write_text(media_item.filename)
-                    break
-                except requests.exceptions.ConnectionError as e:
-                    print(f'[Retrying {tries}]')
-                    # TODO : Need to delete a failed file.
-                    await asyncio.sleep(2)
-
-        await gopro.http_command.set_turbo_mode(mode=Params.Toggle.DISABLE)
 
 async def test_wireless() -> None:
     """
@@ -92,8 +65,7 @@ async def test_wireless() -> None:
         file_list = media_list.data.files
         print(f'Files available: {len(file_list)}')
         await gopro.http_command.set_turbo_mode(mode=Params.Toggle.ENABLE)
-        # TODO: Sort by creation_timestamp, or maybe better by filename (seems to already be sorted anyway)
-        # print(media_list.data.files)
+
         for media_item in file_list:
             print(media_item)
             # media_item.creation_timestamp  -- String.  Looks like epoch timestamp.
