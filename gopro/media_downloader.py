@@ -2,6 +2,7 @@ import time
 from pathlib import Path
 import asyncio
 import os
+from functools import cached_property
 
 from open_gopro import WiredGoPro, Params
 from open_gopro.models import MediaItem
@@ -14,9 +15,13 @@ class MediaDownloader():
         self.download_dest = dest_dir
         self.last_downloaded_file = Path('.download') / '.last-downloaded.txt'
 
-    def get_last_downloaded_filename(self) -> str:
-        last_downloaded = self.last_downloaded_file.read_text() if self.last_downloaded_file.exists() else ''
-        return Path(last_downloaded).name
+    @cached_property
+    def last_downloaded_path(self) -> Path:
+        return Path(self.last_downloaded_file.read_text()) if self.last_downloaded_file.exists() else Path()
+
+    # def get_last_downloaded_filename(self) -> str:
+    #     last_downloaded = self.last_downloaded_file.read_text() if self.last_downloaded_file.exists() else ''
+    #     return Path(last_downloaded).name
 
     async def get_media_list_from_camera(self) -> list[MediaItem]:
         media_list = await self.gopro.http_command.get_media_list()
@@ -25,13 +30,32 @@ class MediaDownloader():
 
         return all_files
 
+    # Need a fix for this situation:
+# 101GOPRO/GX019997.MP4
+# 101GOPRO/GX019998.MP4
+# 101GOPRO/GX019999.MP4
+# 102GOPRO/GX010001.MP4
+# 102GOPRO/GX010002.MP4
+# 102GOPRO/GX010003.MP4
+# 102GOPRO/GX010004.MP4
+# It looks like the file number wraps around 19999->10001 but the folder increments.
     async def download_all_new(self):
+        print("Getting file list from camera...")
         all_files = await self.get_media_list_from_camera()
+        for media_item in all_files:
+            print(media_item.filename)
 
-        last_downloaded = self.get_last_downloaded_filename()
-        file_list = [file for file in all_files if Path(file.filename).name > last_downloaded]
+        last_downloaded_filename = self.last_downloaded_path.name
+        last_downloaded_dir = self.last_downloaded_path.parent
+
+        # TODO BW: Clean this up.
+        file_list = [
+            file for file in all_files
+            if Path(file.filename).name > last_downloaded_filename
+            or str(Path(file.filename).parent) > str(last_downloaded_dir)]
 
         print(f"Downloading latest {len(file_list)} of {len(all_files)} on camera.")
+
         await self.gopro.http_command.set_turbo_mode(mode=Params.Toggle.ENABLE)
 
         for media_item in file_list:
@@ -50,7 +74,7 @@ class MediaDownloader():
         # print(file_meta)
         file_timestamp = int(file_meta.creation_timestamp)
         file_size = int(file_meta.file_size)
-        print(f"Downloading {filename} ({file_size} bytes)")
+        print(f"Downloading {filename} timestamp={file_meta.creation_timestamp} ({file_size} bytes)")
 
         for tries in range(1000):
             try:

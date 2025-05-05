@@ -9,6 +9,8 @@ readme = "README.md"
 python = "~3.11.1"
 open-gopro = "^0.14.1"
 
+[tool.poetry.scripts]
+gopro = "gopro.main:main"
 
 [build-system]
 requires = ["poetry-core"]

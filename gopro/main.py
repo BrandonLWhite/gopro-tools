@@ -14,11 +14,16 @@ import requests.exceptions
 
 from open_gopro import WirelessGoPro, WiredGoPro, Params
 
-from media_downloader import MediaDownloader
+from .media_downloader import MediaDownloader
+
+
+def main():
+    asyncio.run(amain())
+
 
 # File deletion is possible but not currently part of the SDK: https://github.com/gopro/OpenGoPro/issues/74
 #   Will take a little extending to get it working, but seems doable.
-async def main() -> None:
+async def amain() -> None:
     args = parse_args()
     print(args)
     await test_wired(args.dest_dir)
@@ -37,7 +42,37 @@ async def test_wired(dest_dir: str) -> None:
     Actually, it really seems to stay fast after the first few files.
     So, wired/USB is the way to go here.  As good as it gets.  WiFi is slower.
     """
-    files_to_download = set((f"100GOPRO/GX0{index}.MP4" for index in range (12481, 12508)))
+    # files_to_download = set((f"100GOPRO/GX0{index}.MP4" for index in range (12481, 12508)))
+
+    # Looking for "_gopro-web._tcp.local."
+    # _type=_services._dns-sd._udp.local.
+    # name=_gopro-web._tcp.local.
+
+    # If I call
+    #         async_browser = AsyncServiceBrowser(
+        #     local_zc.zeroconf, _gopro-web._tcp.local., listener=listener
+        # )
+    # I get back C3501324697549._gopro-web._tcp.local.
+
+    import zeroconf.asyncio
+    services = list(await zeroconf.asyncio.AsyncZeroconfServiceTypes.async_find())
+    print(services)
+
+    # from zeroconf import ServiceListener
+    # class MyServiceListener(ServiceListener):
+    #     def add_service(self, zc: 'Zeroconf', type_: str, name: str) -> None:
+    #         print("add_service")
+
+    #     def remove_service(self, zc: 'Zeroconf', type_: str, name: str) -> None:
+    #         print("remove_service")
+
+    #     def update_service(self, zc: 'Zeroconf', type_: str, name: str) -> None:
+    #         print("update_service")
+
+    # listener = MyServiceListener()
+    async with zeroconf.asyncio.AsyncZeroconf(unicast=True) as zero_conf:
+        info = await zero_conf.async_get_service_info("_gopro-web._tcp.local.", "C3501324697549._gopro-web._tcp.local.")
+        print(info)
 
     async with WiredGoPro() as gopro:
         cam_info = await gopro.http_command.get_camera_info()
@@ -119,7 +154,3 @@ async def test_wireless() -> None:
         print("Pairing...")
         await client.pair()
         print("Paired.")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
